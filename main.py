@@ -7,8 +7,6 @@ from datetime import datetime, timedelta
 import random
 
 
-#TODO: simplificar o código?, adicionar torneio que aconteceu os úlimos jogos, verificar textos e fazer correções
-
 # Dicionário de tradução de mapas
 MAP_TRANSLATION = {
     "de_anubis": "Anubis",
@@ -93,21 +91,63 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await handle_menu(update, context)
 
+import requests
+from bs4 import BeautifulSoup
+import json
+from typing import Dict, Any
+
+async def fetch_draft5_data(equipe_id: int = 330) -> Dict[str, Any]:
+    """
+    Obtém dados estruturados do site Draft5.gg para uma equipe específica
+    
+    Args:
+        equipe_id: ID da equipe no Draft5 (padrão: 330 para FURIA)
+    
+    Returns:
+        Dicionário com os dados parseados
+        
+    Raises:
+        Exception: Em caso de falha na requisição ou parsing
+    """
+    url = f"https://draft5.gg/equipe/{equipe_id}-FURIA"  # Padrão FURIA, mas pode ser generalizado
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/91.0.4472.124 Safari/537.36"
+    }
+    
+    try:
+        # 1. Faz a requisição
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()  # Levanta exceção para status 4XX/5XX
+        
+        # 2. Parseia o HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+        script = soup.find("script", id="__NEXT_DATA__")
+        
+        if not script:
+            raise ValueError("Dados NEXT_DATA não encontrados no HTML")
+            
+        # 3. Converte JSON
+        return json.loads(script.string)
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Erro na requisição: {e}")
+        raise
+    except json.JSONDecodeError as e:
+        print(f"Erro ao decodificar JSON: {e}")
+        raise
+    except Exception as e:
+        print(f"Erro inesperado: {e}")
+        raise
+
 async def lineup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reset_timeout(context, update.effective_chat.id)
 
-    url = "https://draft5.gg/equipe/330-FURIA"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-
     try:
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        script = soup.find("script", id="__NEXT_DATA__")
-        data = json.loads(script.string)
-        
+        data = await fetch_draft5_data()
+
         titulares = [
             p["playerNickname"] for p in data["props"]["pageProps"]["data"]["playerData"]
             if any(h["status"] == "Titular" for h in p["playerHistory"])
@@ -128,17 +168,12 @@ async def lineup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ultimos_jogos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reset_timeout(context, update.effective_chat.id)
-
-    url = "https://draft5.gg/equipe/330-FURIA"
-    headers = {"User-Agent": "Mozilla/5.0"}
     
     try:
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        script = soup.find("script", id="__NEXT_DATA__")
-        data = json.loads(script.string)
+        data = await fetch_draft5_data()
 
         for resultado in data["props"]["pageProps"]["results"][:4]:
+            torneio = resultado["tournament"]["tournamentName"]
             adversario = resultado["teamB"]["teamName"]
             placar = f"{resultado['seriesScoreA']}-{resultado['seriesScoreB']}"
             mapas = ", ".join([
@@ -146,7 +181,7 @@ async def ultimos_jogos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for s in resultado["scores"]
             ])
             await update.message.reply_text(
-                f"FURIA vs {adversario}: {placar} | Mapas: {mapas}"
+                f"🏆 {torneio} \nFURIA vs {adversario}: {placar} \n 📍Mapas: {mapas}"
             )
 
     except Exception as e:
@@ -156,49 +191,44 @@ async def prox_jogos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reset_timeout(context, update.effective_chat.id)
 
-    url = "https://draft5.gg/equipe/330-FURIA"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
+    try:
+        data = await fetch_draft5_data()
 
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    script = soup.find("script", id="__NEXT_DATA__")
-    data = json.loads(script.string)
+        def timestamp_to_date(timestamp):
+            return datetime.utcfromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
 
-    def timestamp_to_date(timestamp):
-        return datetime.utcfromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
+        # Obter as próximas partidas do Vitality
+        proximas_partidas = []
+        for match in data['props']['pageProps']['matches']:
+            if not match['isFinished']:
+                adversario = match['teamB']['teamName'] if match['teamA']['teamId'] == 330 else match['teamA']['teamName']
+                
+                partida = {
+                    'adversario': adversario,
+                    'data': timestamp_to_date(match['matchDate']),
+                    'torneio': match['tournament']['tournamentName'],
+                }
+                proximas_partidas.append(partida)
 
-    # Obter as próximas partidas do Vitality
-    proximas_partidas = []
-    for match in data['props']['pageProps']['matches']:
-        if not match['isFinished']:
-            adversario = match['teamB']['teamName'] if match['teamA']['teamId'] == 330 else match['teamA']['teamName']
-            
-            partida = {
-                'adversario': adversario,
-                'data': timestamp_to_date(match['matchDate']),
-                'torneio': match['tournament']['tournamentName'],
-            }
-            proximas_partidas.append(partida)
+        # Construir mensagem
+        if not proximas_partidas:
+            await update.message.reply_text("ℹ️ Não há partidas agendadas para a Furia no momento.")
+            return
 
-    # Construir mensagem
-    if not proximas_partidas:
-        await update.message.reply_text("ℹ️ Não há partidas agendadas para a Furia no momento.")
-        return
-
-    mensagem = "🗓️ **Próximas Partidas da Furia**\n\n"
-    
-    for partida in proximas_partidas:
-        mensagem += (
-            f"🆚 **{partida['adversario']}**\n"
-            f"📅 {partida['data']}\n"
-            f"🏆 {partida['torneio']}\n"
-        )
+        mensagem = "🗓️ **Próximas Partidas da Furia**\n\n"
         
-        mensagem += "──────────────────\n"
+        for partida in proximas_partidas:
+            mensagem += (
+                f"🆚 **{partida['adversario']}**\n"
+                f"📅 {partida['data']}\n"
+                f"🏆 {partida['torneio']}\n"
+            )
+            
+            mensagem += "──────────────────\n"
 
-    await update.message.reply_text(mensagem, parse_mode="Markdown")
+        await update.message.reply_text(mensagem, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text("❌ Erro ao buscar próximas partidas. Tente novamente mais tarde.")
 
 
 async def send_furia_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
