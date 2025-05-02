@@ -1,11 +1,13 @@
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, JobQueue
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, Chat, Message 
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 import requests
 from bs4 import BeautifulSoup
 import json
 from datetime import datetime, timedelta
 import random
-from apscheduler.jobstores.base import JobLookupError
+
+
+#TODO: simplificar o código?, adicionar torneio que aconteceu os úlimos jogos, verificar textos e fazer correções
 
 # Dicionário de tradução de mapas
 MAP_TRANSLATION = {
@@ -24,52 +26,40 @@ MAP_TRANSLATION = {
     "de_season": "Season"
 }
 
+TIMEOUT_MINUTES = 10
+
 def translate_map(map_name):
     return MAP_TRANSLATION.get(map_name, map_name)
 
-# ... (mantenha suas constantes e funções de tradução como estão)
-
-async def timeout_callback(context: ContextTypes.DEFAULT_TYPE):
-    """Função chamada quando o tempo acabar"""
-    job = context.job
-    await context.bot.send_message(
-        chat_id=job.chat_id,
-        text="⏰ Parece que você ficou inativo por muito tempo. "
-             "Digite /start para começar novamente!",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-async def reset_timeout(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    """Reseta o timeout para o chat específico"""
+async def reset_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Função async para resetar timeout"""
     try:
-        # Verifica se existe um job antigo e tenta removê-lo
-        if 'job' in context.chat_data and context.chat_data['job'] is not None:
+        chat_id = update.effective_chat.id
+        
+        if 'timeout_job' in context.user_data:
             try:
-                old_job = context.chat_data['job']
-                if old_job:
-                    old_job.schedule_removal()
-            except JobLookupError:
-                # O job já foi removido, podemos ignorar o erro
+                context.user_data['timeout_job'].schedule_removal()
+            except Exception:
                 pass
-            except Exception as e:
-                print(f"Erro ao remover job antigo: {e}")
-    
-    except KeyError:
-        # Não há job no chat_data, podemos prosseguir
-        pass
-    
-    # Agenda um novo job
-    context.chat_data['job'] = context.job_queue.run_once(
-        callback=timeout_callback,
-        when=timedelta(minutes=1),  # Teste com 1 minuto
-        chat_id=chat_id,
-        name=str(chat_id)
-    )
+
+        async def timeout_wrapper(_):
+            await  update.message.reply_text("⏰ Sessão encerrada por AFK!")
+            await sair(update, context)
+        
+        context.user_data['timeout_job'] = context.job_queue.run_once(
+            timeout_wrapper,
+            timedelta(minutes=TIMEOUT_MINUTES),
+            chat_id=chat_id,
+            name=f"timeout_{chat_id}"
+        )
+
+    except Exception as e:
+        print(f"Erro ao resetar timeout: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler para o comando /start"""
-    await reset_timeout(context, update.effective_chat.id)
-    
+    await reset_timeout(update, context)  
+
     teclado = ReplyKeyboardMarkup(
         [
             ["Próximos Jogos 🎮", "Resultados 📊"],
@@ -82,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     await update.message.reply_text(
-        "🐾 Bem-vindo ao Bot Oficial da FURIA!\n\n"
+        "🐾 Bem-vindo ao Bot Oficial da FURIA CS!\n\n"
         "Aqui você encontra:\n"
         "• Próximos jogos e resultados\n"
         "• Elenco completo\n"
@@ -94,46 +84,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['iniciado'] = True
 
 async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler para todas as mensagens"""
-    # Resetar o timeout
-    await reset_timeout(context, update.effective_chat.id)
+    """Handler principal"""
+    await reset_timeout(update, context)  # Reseta o timer
     
-    # Se for primeira mensagem
     if not context.user_data.get('iniciado'):
         await start(update, context)
         return
     
-    # Encaminhar para o handler de menu
     await handle_menu(update, context)
 
-async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler para as opções do menu"""
-    texto = update.message.text
-    
-    if texto == "Elenco 👥":
-        await lineup(update, context)
-    elif texto == "Ingressos 🎟️":
-        await update.message.reply_text("🎟️ Compre ingressos: https://furia.gg/ingressos")
-    elif texto == "Resultados 📊":
-        await ultimos_jogos(update, context)
-    elif texto == "Próximos Jogos 🎮":
-        await prox_jogos(update, context)
-    elif texto == "Jogo Ao Vivo 🔴":
-        await update.message.reply_text("🔴 Assista ao vivo: https://twitch.tv/furia")
-    elif texto == "Redes 📱":
-        await update.message.reply_text(
-            "📱 Redes oficiais:\n"
-            "• Twitter: @furiagg\n"
-            "• Instagram: @furia\n"
-            "• Site: https://furia.gg"
-        )
-    elif texto == "Torcida 🐾":
-        await send_furia_sticker(update, context)
-    elif texto == "Sair ❌":
-        await sair(update, context)
-    else:
-        await update.message.reply_text("❌ Opção inválida. Use os botões abaixo.")
-    
 async def lineup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reset_timeout(context, update.effective_chat.id)
@@ -170,7 +129,7 @@ async def ultimos_jogos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reset_timeout(context, update.effective_chat.id)
 
-    url = "https://draft5.gg/equipe/773-Vitality"
+    url = "https://draft5.gg/equipe/330-FURIA"
     headers = {"User-Agent": "Mozilla/5.0"}
     
     try:
@@ -257,29 +216,32 @@ async def send_furia_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("🔥 VAMOS FURIA! 🔥")
 
 async def sair(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if 'job' in context.chat_data:
-        context.chat_data['job'].schedule_removal()
-    await update.message.reply_text(
-        "🐾 Até logo! Dá uma call se precisar de mais alguma coisa.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    context.user_data.clear()
+    """Função sair corrigida"""
+    try:
+        # 1. Cancela timeout
+        if 'timeout_job' in context.user_data:
+            try:
+                context.user_data['timeout_job'].schedule_removal()
+            except Exception:
+                pass
+
+        # 2. Envia mensagem de forma segura
+        if update.effective_chat:  # Verifica se é uma mensagem real
+            await context.bot.send_message(  # Usa context.bot diretamente
+                chat_id=update.effective_chat.id,
+                text="🐾 Até logo! Mande qualquer mensagem para voltar.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+
+        # 3. Limpa estado
+        context.user_data.clear()
+
+    except Exception as e:
+        print(f"Erro no /sair: {e}")
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text
     
-    await reset_timeout(context, update.effective_chat.id)
-    # Resetar o timer a cada mensagem recebida
-    if 'job' in context.chat_data:
-        context.chat_data['job'].schedule_removal()
-    
-    context.chat_data['job'] = context.job_queue.run_once(
-        callback=timeout_callback,
-        when=timedelta(minutes=5),
-        chat_id=update.effective_chat.id,
-        name=str(update.effective_chat.id)
-    )
-
     if texto == "Elenco 👥":
         await lineup(update, context)
     elif texto == "Ingressos 🎟️":
