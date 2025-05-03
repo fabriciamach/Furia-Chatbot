@@ -75,6 +75,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Próximos jogos e resultados\n"
         "• Elenco completo\n"
         "• Ingressos e transmissões\n"
+        "• Link das Redes Sociais\n"
         "• Stickers da torcida\n\n"
         "VAMOS COM OS FURIOSOS! 🖤🔥",
         reply_markup=teclado
@@ -197,7 +198,7 @@ async def prox_jogos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         def timestamp_to_date(timestamp):
             return datetime.utcfromtimestamp(timestamp).strftime('%d/%m/%Y %H:%M')
 
-        # Obter as próximas partidas do Vitality
+        # Obter as próximas partidas da Furia
         proximas_partidas = []
         for match in data['props']['pageProps']['matches']:
             if not match['isFinished']:
