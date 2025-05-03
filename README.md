@@ -1,7 +1,7 @@
 # FURIA ChatBot - Documentação
 
 ## 📌 Visão Geral
-Bot oficial da FURIA Esports para Telegram, fornece informações sobre:
+Bot oficial da FURIA CS para Telegram, fornece informações sobre:
 - Próximos jogos e resultados
 - Elenco e staff
 - Links para transmissões e ingressos
