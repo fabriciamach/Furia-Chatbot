@@ -5,6 +5,7 @@ Bot oficial da FURIA Esports para Telegram, fornece informações sobre:
 - Próximos jogos e resultados
 - Elenco e staff
 - Links para transmissões e ingressos
+- Links Redes Sociais
 
 ## 🛠 Tecnologias
 - Python 3.10+
